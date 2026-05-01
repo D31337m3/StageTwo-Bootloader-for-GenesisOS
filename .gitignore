@@ -1,0 +1,6 @@
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+.vscode/.browse.c_cpp.db*
+.DS_Store

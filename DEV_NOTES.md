@@ -1,15 +1,10 @@
 ﻿# GenesisOS StageTwo - Development Notes
 
-## Changelog
-
-- 2026-05-04: Updated `README.md` for GitHub-facing project overview/build instructions and expanded `.gitignore` to exclude local/internal docs (including `DEV_NOTES.md`) plus Windows `Zone.Identifier` artifacts.
-
 ## Overview
+While technically a third stage in the boot process (the ROM bootloader is the first stage, ESP-IDF bootloader is the second), StageTwo is the Boot Manager Application for GenesisOS. It runs immediately after the ESP-IDF bootloader and before GenesisOS, providing:
 
-StageTwo is the Stage2 Boot Manager Application for GenesisOS. It runs immediately after the ESP-IDF bootloader and before GenesisOS, providing:
-
-- Splash screen
-- Boot menu named `StageTwo`
+- Splash screen 'GenesisOS' animation 
+- Boot menu named `StageTwo` with options to boot GenesisOS, enter recovery, manage updates, and advanced tools
 - Recovery console
 - OTA update system
 - Backup/restore tools

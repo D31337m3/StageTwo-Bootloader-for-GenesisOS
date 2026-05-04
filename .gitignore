@@ -4,3 +4,14 @@ sdkconfig
 sdkconfig.old
 .vscode/.browse.c_cpp.db*
 .DS_Store
+
+# Local/internal notes (do not sync)
+DEV_NOTES.md
+Build_Notes_Internal.md
+*Internal*.md
+*Private*.md
+notes/
+docs/internal/
+
+# Windows / NTFS metadata
+*Zone.Identifier

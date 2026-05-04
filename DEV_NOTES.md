@@ -1,5 +1,9 @@
 ﻿# GenesisOS StageTwo - Development Notes
 
+## Changelog
+
+- 2026-05-04: Updated `README.md` for GitHub-facing project overview/build instructions and expanded `.gitignore` to exclude local/internal docs (including `DEV_NOTES.md`) plus Windows `Zone.Identifier` artifacts.
+
 ## Overview
 
 StageTwo is the Stage2 Boot Manager Application for GenesisOS. It runs immediately after the ESP-IDF bootloader and before GenesisOS, providing:

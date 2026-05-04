@@ -13,5 +13,12 @@ Build_Notes_Internal.md
 notes/
 docs/internal/
 
+# Agent instruction files (local/dev-only)
+AGENTS.md
+**/AGENTS.md
+AGENTS.*.md
+.agents/
+.codex/
+
 # Windows / NTFS metadata
 *Zone.Identifier

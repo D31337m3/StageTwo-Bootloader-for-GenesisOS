@@ -1,5 +1,10 @@
 ﻿# GenesisOS StageTwo - Development Notes
 
+## Changelog
+
+- 2026-05-04: Updated `README.md` for GitHub-facing project overview/build instructions and expanded `.gitignore` to exclude local/internal docs plus Windows `Zone.Identifier` artifacts.
+- 2026-05-04: Expanded `.gitignore` to ignore agent instruction files/directories (`AGENTS.md`, `.agents/`, `.codex/`).
+
 ## Overview
 While technically a third stage in the boot process (the ROM bootloader is the first stage, ESP-IDF bootloader is the second), StageTwo is the Boot Manager Application for GenesisOS. It runs immediately after the ESP-IDF bootloader and before GenesisOS, providing:
 

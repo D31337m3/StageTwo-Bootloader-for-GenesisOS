@@ -4,6 +4,8 @@
 #include "esp_log.h"
 
 #ifndef STAGETWO_BOOT_BUTTON_GPIO
+// Waveshare ESP32-S3-Touch-AMOLED-1.8: BOOT button is GPIO0.
+// Note: GPIO0 is also a strapping pin. Keep input-only + pull-up.
 #define STAGETWO_BOOT_BUTTON_GPIO GPIO_NUM_0
 #endif
 
@@ -44,17 +46,17 @@ ButtonEvent poll_button()
     const int64_t now = esp_timer_get_time();
     const bool pressed = is_boot_button_held();
 
+    // On press edge, just mark state; don't emit a "hold active" event that can be misused
+    // by callers expecting discrete actions.
     if (pressed && !s_last_pressed) {
         s_press_start_us = now;
         s_last_pressed = true;
-        return ButtonEvent::HoldActive;
+        return ButtonEvent::None;
     }
 
     if (pressed && s_last_pressed) {
-        if ((now - s_press_start_us) >= 5000000) {
-            return ButtonEvent::Hold5s;
-        }
-        return ButtonEvent::HoldActive;
+        if ((now - s_press_start_us) >= 5000000) return ButtonEvent::Hold5s;
+        return ButtonEvent::None;
     }
 
     if (!pressed && s_last_pressed) {
@@ -62,22 +64,11 @@ ButtonEvent poll_button()
         s_last_pressed = false;
         s_press_start_us = 0;
 
-        if (duration > 800000) {
-            return ButtonEvent::LongPress;
-        }
-
-        if (now - s_last_release_us < 450000) {
-            s_tap_count++;
-        } else {
-            s_tap_count = 1;
-        }
+        // Treat any release <5s as a discrete "short press" for StageTwo UI purposes.
+        // This avoids accidental long-press behaviors while we stabilize the menu trigger.
+        (void)duration;
+        s_tap_count = 0;
         s_last_release_us = now;
-
-        if (s_tap_count >= 2) {
-            s_tap_count = 0;
-            return ButtonEvent::DoublePress;
-        }
-
         return ButtonEvent::ShortPress;
     }
 

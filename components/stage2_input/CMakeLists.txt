@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "stage2_input.cpp"
     INCLUDE_DIRS "include"
-    REQUIRES driver esp_partition nvs_flash app_update esp_wifi fatfs
+    REQUIRES driver esp_partition nvs_flash app_update esp_wifi fatfs esp_timer
 )

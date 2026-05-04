@@ -4,6 +4,7 @@
 #include "stage2_nvs.hpp"
 #include "genesis_theme.hpp"
 #include "genesis_display.hpp"
+#include "stage2_wifi.h"
 
 #include "esp_log.h"
 #include "esp_err.h"
@@ -14,7 +15,7 @@
 #include "esp_partition.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-#include "mbedtls/md5.h"
+#include "mbedtls/md.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "string.h"
@@ -42,7 +43,22 @@ static std::string s_saved_version;
 static std::string s_saved_sha256;
 static size_t s_saved_size = 0;
 
-static void http_event_handler(esp_http_client_event_t* evt)
+static const char* kSlotA = "genesis_a";
+static const char* kSlotB = "genesis_b";
+
+static const char* pick_inactive_slot_label()
+{
+    const esp_partition_t* boot = esp_ota_get_boot_partition();
+    if (boot) {
+        if (strcmp(boot->label, kSlotA) == 0) return kSlotB;
+        if (strcmp(boot->label, kSlotB) == 0) return kSlotA;
+    }
+
+    // Unknown/currently not a GenesisOS slot -> default to slot B, keeping slot A as the "known good" slot.
+    return kSlotB;
+}
+
+static esp_err_t http_event_handler(esp_http_client_event_t* evt)
 {
     switch (evt->event_id) {
         case HTTP_EVENT_ERROR:
@@ -68,6 +84,8 @@ static void http_event_handler(esp_http_client_event_t* evt)
         default:
             break;
     }
+
+    return ESP_OK;
 }
 
 bool fetch_manifest(UpdateManifest* manifest)
@@ -76,13 +94,12 @@ bool fetch_manifest(UpdateManifest* manifest)
 
     ESP_LOGI(TAG, "Fetching update manifest from: %s", GENESIS_UPDATE_MANIFEST_URL);
 
-    // Configure HTTP client
-    esp_http_client_config_t config = {
-        .url = GENESIS_UPDATE_MANIFEST_URL,
-        .event_handler = http_event_handler,
-        .timeout_ms = 10000,
-        .transport_type = HTTP_TRANSPORT_OVER_TCP,
-    };
+    // Configure HTTP client (avoid designated initializers in C++).
+    esp_http_client_config_t config = {};
+    config.url = GENESIS_UPDATE_MANIFEST_URL;
+    config.event_handler = http_event_handler;
+    config.timeout_ms = 10000;
+    config.transport_type = HTTP_TRANSPORT_OVER_TCP;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
@@ -198,15 +215,17 @@ bool save_update(const uint8_t* data, size_t len)
 {
     ESP_LOGI(TAG, "Saving update to flash: %zu bytes", len);
 
-    // Find recoverydata partition
-    const esp_partition_t* part = esp_partition_find_first(
-        ESP_PARTITION_TYPE_DATA,
-        ESP_PARTITION_SUBTYPE_DATA_FAT,
-        "recoverydata"
-    );
+    // Save into the inactive GenesisOS OTA slot (A/B), never into the golden recovery image.
+    const char* slot_label = pick_inactive_slot_label();
+    const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, slot_label);
 
     if (!part) {
-        ESP_LOGE(TAG, "Recovery partition not found");
+        ESP_LOGE(TAG, "Target OTA slot not found (%s)", slot_label);
+        return false;
+    }
+
+    if (len > part->size) {
+        ESP_LOGE(TAG, "Update too large for OTA slot %s: %zu > %zu", slot_label, len, part->size);
         return false;
     }
 
@@ -218,8 +237,7 @@ bool save_update(const uint8_t* data, size_t len)
     }
 
     // Write data
-    size_t write_len = (len > part->size) ? part->size : len;
-    err = esp_partition_write(part, 0, data, write_len);
+    err = esp_partition_write(part, 0, data, len);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to write update: %s", esp_err_to_name(err));
         return false;
@@ -235,11 +253,12 @@ bool save_update(const uint8_t* data, size_t len)
 
     nvs_set_str(nvs, "saved_version", s_saved_version.c_str());
     nvs_set_str(nvs, "saved_sha256", s_saved_sha256.c_str());
-    nvs_set_u64(nvs, "saved_size", s_saved_size);
+    nvs_set_str(nvs, "saved_slot", slot_label);
+    nvs_set_u64(nvs, "saved_size", (uint64_t)s_saved_size);
     nvs_commit(nvs);
     nvs_close(nvs);
 
-    ESP_LOGI(TAG, "Update saved successfully");
+    ESP_LOGI(TAG, "Update saved successfully to %s", slot_label);
     return true;
 }
 
@@ -271,12 +290,20 @@ bool get_saved_update_info(UpdateManifest* manifest)
 
     char version[64] = {0};
     char sha256[64] = {0};
+    char slot[16] = {0};
     size_t len = sizeof(version);
 
     nvs_get_str(nvs, "saved_version", version, &len);
     len = sizeof(sha256);
     nvs_get_str(nvs, "saved_sha256", sha256, &len);
-    nvs_get_u64(nvs, "saved_size", &s_saved_size);
+    len = sizeof(slot);
+    if (nvs_get_str(nvs, "saved_slot", slot, &len) != ESP_OK) {
+        // Backward compatibility: older builds used a fixed staging partition.
+        strncpy(slot, kSlotB, sizeof(slot) - 1);
+    }
+    uint64_t saved_size_u64 = 0;
+    nvs_get_u64(nvs, "saved_size", &saved_size_u64);
+    s_saved_size = (size_t)saved_size_u64;
 
     nvs_close(nvs);
 
@@ -284,6 +311,7 @@ bool get_saved_update_info(UpdateManifest* manifest)
     manifest->sha256 = sha256;
     manifest->size = s_saved_size;
 
+    ESP_LOGI(TAG, "Saved update slot: %s", slot);
     return true;
 }
 
@@ -296,13 +324,12 @@ bool download_update(const UpdateManifest& manifest, DownloadProgress* progress)
     s_downloading = true;
     s_progress = {0, 0, 0};
 
-    // Configure HTTP client for download
-    esp_http_client_config_t config = {
-        .url = manifest.url.c_str(),
-        .event_handler = http_event_handler,
-        .timeout_ms = 30000,
-        .transport_type = HTTP_TRANSPORT_OVER_TCP,
-    };
+    // Configure HTTP client for download (avoid designated initializers in C++).
+    esp_http_client_config_t config = {};
+    config.url = manifest.url.c_str();
+    config.event_handler = http_event_handler;
+    config.timeout_ms = 30000;
+    config.transport_type = HTTP_TRANSPORT_OVER_TCP;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
@@ -402,47 +429,21 @@ bool download_update_flow()
         }
     }
 
-    // Initialize Wi-Fi
+    // Initialize Wi-Fi + autoconnect using GenesisOS-style persisted creds (/user/wifi.toml).
     ESP_LOGI(TAG, "Initializing Wi-Fi for OTA");
+    (void)stage2_wifi_init();
+    (void)stage2_wifi_autoconnect();
 
-    wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&wifi_init_cfg);
-
-    wifi_config_t wifi_config = {
-        .sta = {
-            .threshold.auth = WIFI_AUTH_WPA2_PSK,
-        },
-    };
-
-    // Use OSK password for now
-    strncpy((char*)wifi_config.sta.password, GENESIS_OSK_PASSWORD, sizeof(wifi_config.sta.password) - 1);
-    strncpy((char*)wifi_config.sta.ssid, "GenesisOS-Update", sizeof(wifi_config.sta.ssid) - 1);
-
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
-    esp_wifi_start();
-
-    // Connect to network
-    ESP_LOGI(TAG, "Connecting to Wi-Fi...");
-    esp_wifi_connect();
-
-    // Wait for connection (with timeout)
     int retries = 30;
-    wifi_sta_list_t sta_list;
     while (retries-- > 0) {
+        if (stage2_wifi_is_connected()) break;
         vTaskDelay(pdMS_TO_TICKS(500));
-        if (esp_wifi_sta_list_get(&sta_list) == ESP_OK && sta_list.num > 0) {
-            break;
-        }
     }
-
-    if (retries <= 0) {
-        ESP_LOGE(TAG, "Wi-Fi connection failed");
-        esp_wifi_stop();
+    if (!stage2_wifi_is_connected()) {
+        ESP_LOGE(TAG, "Wi-Fi not connected; configure in Advanced -> Wi-Fi Setup");
+        stage2_ui::show_error("Wi-Fi not connected. Configure Advanced -> Wi-Fi Setup");
         return false;
     }
-
-    ESP_LOGI(TAG, "Wi-Fi connected");
 
     // Fetch manifest
     UpdateManifest manifest;
@@ -493,60 +494,37 @@ bool install_saved_update()
 
     ESP_LOGI(TAG, "Installing saved update: %s", manifest.version.c_str());
 
-    // Read from recovery partition
-    const esp_partition_t* part = esp_partition_find_first(
-        ESP_PARTITION_TYPE_DATA,
-        ESP_PARTITION_SUBTYPE_DATA_FAT,
-        "recoverydata"
-    );
+    // Installing means marking the saved slot for next boot.
+    // The slot label is persisted in NVS by save_update().
+    nvs_handle_t nvs;
+    esp_err_t nvs_err = nvs_open("ota", NVS_READONLY, &nvs);
+    char slot[16] = {0};
+    size_t slot_len = sizeof(slot);
+    if (nvs_err == ESP_OK) {
+        if (nvs_get_str(nvs, "saved_slot", slot, &slot_len) != ESP_OK) {
+            strncpy(slot, kSlotB, sizeof(slot) - 1);
+        }
+        nvs_close(nvs);
+    } else {
+        strncpy(slot, kSlotB, sizeof(slot) - 1);
+    }
 
-    if (!part) {
-        ESP_LOGE(TAG, "Recovery partition not found");
+    const esp_partition_t* staged = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, slot);
+
+    if (!staged) {
+        ESP_LOGE(TAG, "Saved slot partition not found (%s)", slot);
         return false;
     }
 
-    // Read image header to validate
-    uint8_t header[32];
-    esp_partition_read(part, 0, header, sizeof(header));
-
-    // Find inactive OTA partition
-    const esp_partition_t* ota_part = esp_partition_find_first(
-        ESP_PARTITION_TYPE_APP,
-        ESP_PARTITION_SUBTYPE_APP_OTA_0
-    );
-
-    if (!ota_part) {
-        ESP_LOGE(TAG, "No OTA partition found");
+    esp_app_desc_t desc = {};
+    if (esp_ota_get_partition_description(staged, &desc) != ESP_OK) {
+        ESP_LOGE(TAG, "Staged image is not a valid app partition");
         return false;
     }
 
-    // Write to OTA partition
     stage2_ui::show_progress("Installing Update", 50);
 
-    esp_err_t err = esp_partition_erase_range(ota_part, 0, ota_part->size);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to erase OTA partition: %s", esp_err_to_name(err));
-        return false;
-    }
-
-    // Copy from recovery to OTA (in chunks)
-    size_t chunk_size = 4096;
-    uint8_t* chunk = (uint8_t*)malloc(chunk_size);
-    size_t written = 0;
-
-    while (written < manifest.size && written < ota_part->size) {
-        esp_partition_read(part, written, chunk, chunk_size);
-        esp_partition_write(ota_part, written, chunk, chunk_size);
-        written += chunk_size;
-
-        int percent = (written * 100) / manifest.size;
-        stage2_ui::show_progress("Installing Update", percent);
-    }
-
-    free(chunk);
-
-    // Set boot partition
-    err = esp_ota_set_boot_partition(ota_part);
+    esp_err_t err = esp_ota_set_boot_partition(staged);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set boot partition: %s", esp_err_to_name(err));
         return false;

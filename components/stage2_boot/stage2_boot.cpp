@@ -59,10 +59,13 @@ bool boot_partition(const char* label)
 
 bool boot_genesisos()
 {
-    if (boot_partition("ota_0")) return true;
-    if (boot_partition("ota_1")) return true;
+    // Primary boot target is the stable GenesisOS slot A
+    if (boot_partition("genesis_a")) return true;
 
-    ESP_LOGE(TAG, "No valid GenesisOS OTA partition found");
+    // Fallback: boot slot B if it contains a valid image
+    if (boot_partition("genesis_b")) return true;
+
+    ESP_LOGE(TAG, "No valid GenesisOS image partition found");
     return false;
 }
 

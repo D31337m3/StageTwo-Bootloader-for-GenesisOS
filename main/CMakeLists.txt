@@ -6,6 +6,7 @@ idf_component_register(
         stage2_input
         stage2_ui
         stage2_recovery
+        stage2_fs
         stage2_nvs
         stage2_logging
         genesis_display

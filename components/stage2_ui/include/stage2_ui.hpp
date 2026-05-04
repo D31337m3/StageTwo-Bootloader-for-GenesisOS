@@ -15,6 +15,7 @@ void tick();
 SplashResult show_splash_and_detect_boot_request();
 void show_boot_menu();
 void show_advanced_menu();
+void show_wifi_setup();
 void show_progress(const char* title, int percent);
 void show_error(const char* message);
 

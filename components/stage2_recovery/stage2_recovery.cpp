@@ -3,6 +3,7 @@
 #include "stage2_repair.hpp"
 #include "stage2_ota.hpp"
 #include "stage2_logging.hpp"
+#include "stage2_input.hpp"
 #include "genesis_theme.hpp"
 #include "genesis_display.hpp"
 
@@ -57,7 +58,7 @@ void create_recovery_menu()
     lv_obj_t* title = lv_label_create(s_recovery_screen);
     lv_label_set_text(title, "Recovery Mode");
     lv_obj_set_pos(title, 20, 20);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0xFF3B3B), 0);
 
     // Subtitle
@@ -74,7 +75,7 @@ bool system_scan()
 
     // Scan partitions
     const esp_partition_t* parts[10];
-    esp_partition_iterator_t it = esp_partition_create(ESP_PARTITION_TYPE_ANY, NULL, NULL);
+    esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, NULL);
 
     int count = 0;
     while (it && count < 10) {
@@ -156,7 +157,7 @@ void run()
 
         lv_obj_t* lbl = lv_label_create(buttons[i]);
         lv_label_set_text(lbl, items[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(0xF4F7FF), 0);
         lv_obj_set_style_align(lbl, LV_ALIGN_CENTER, 0);
 
@@ -236,7 +237,7 @@ void run()
 
                 lv_obj_t* lbl = lv_label_create(buttons[i]);
                 lv_label_set_text(lbl, items[i]);
-                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
                 lv_obj_set_style_text_color(lbl, lv_color_hex(0xF4F7FF), 0);
                 lv_obj_set_style_align(lbl, LV_ALIGN_CENTER, 0);
 
@@ -271,11 +272,6 @@ bool backup_firmware()
 
 bool backup_user_data()
 {
-    ESP_LOGI(TAG, "Backup user data placeholder");
-    return true;
-}
-
-}
     ESP_LOGI(TAG, "Backup user data placeholder");
     return true;
 }

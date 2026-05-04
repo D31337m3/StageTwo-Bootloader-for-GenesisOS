@@ -145,27 +145,40 @@ void run()
         "Factory Reset",
         "Reboot to StageTwo"
     };
+    constexpr int item_count = 6;
 
     int selected = 0;
+    lv_obj_t* buttons[item_count] = {nullptr};
 
-    // Create menu item buttons
-    lv_obj_t* buttons[6] = {nullptr};
-    for (int i = 0; i < 6; i++) {
-        buttons[i] = lv_btn_create(s_recovery_screen);
-        lv_obj_set_pos(buttons[i], 40, 100 + i * 50);
-        lv_obj_set_size(buttons[i], 288, 40);
+    auto create_buttons = [&]() {
+        for (int i = 0; i < item_count; i++) {
+            buttons[i] = lv_btn_create(s_recovery_screen);
+            if (!buttons[i]) {
+                ESP_LOGE(TAG, "Failed to create recovery button %d", i);
+                continue;
+            }
 
-        lv_obj_t* lbl = lv_label_create(buttons[i]);
-        lv_label_set_text(lbl, items[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(0xF4F7FF), 0);
-        lv_obj_set_style_align(lbl, LV_ALIGN_CENTER, 0);
+            lv_obj_set_pos(buttons[i], 40, 100 + i * 50);
+            lv_obj_set_size(buttons[i], 288, 40);
 
-        style_button(buttons[i], 0x1A1A2E);
-    }
+            lv_obj_t* lbl = lv_label_create(buttons[i]);
+            if (lbl) {
+                lv_label_set_text(lbl, items[i]);
+                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+                lv_obj_set_style_text_color(lbl, lv_color_hex(0xF4F7FF), 0);
+                lv_obj_set_style_align(lbl, LV_ALIGN_CENTER, 0);
+            }
+
+            style_button(buttons[i], 0x1A1A2E);
+        }
+    };
 
     auto update_selection = [&]() {
-        for (int i = 0; i < 6; i++) {
+        if (selected < 0 || selected >= item_count) selected = 0;
+
+        for (int i = 0; i < item_count; i++) {
+            if (!buttons[i]) continue;
+
             if (i == selected) {
                 style_button_selected(buttons[i]);
                 lv_obj_set_style_bg_color(buttons[i], lv_color_hex(0x2A2A4E), 0);
@@ -175,13 +188,15 @@ void run()
             }
         }
     };
+
+    create_buttons();
     update_selection();
 
     while (true) {
         auto ev = stage2_input::poll_button();
 
         if (ev == stage2_input::ButtonEvent::ShortPress) {
-            selected = (selected + 1) % 6;
+            selected = (selected + 1) % item_count;
             update_selection();
             ESP_LOGI(TAG, "Recovery selected: %s", items[selected]);
         }
@@ -228,21 +243,10 @@ void run()
                     break;
             }
 
-            // Recreate menu after action
             create_recovery_menu();
-            for (int i = 0; i < 6; i++) {
-                buttons[i] = lv_btn_create(s_recovery_screen);
-                lv_obj_set_pos(buttons[i], 40, 100 + i * 50);
-                lv_obj_set_size(buttons[i], 288, 40);
-
-                lv_obj_t* lbl = lv_label_create(buttons[i]);
-                lv_label_set_text(lbl, items[i]);
-                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
-                lv_obj_set_style_text_color(lbl, lv_color_hex(0xF4F7FF), 0);
-                lv_obj_set_style_align(lbl, LV_ALIGN_CENTER, 0);
-
-                style_button(buttons[i], 0x1A1A2E);
-            }
+            memset(buttons, 0, sizeof(buttons));
+            if (selected >= item_count) selected = 0;
+            create_buttons();
             update_selection();
         }
 

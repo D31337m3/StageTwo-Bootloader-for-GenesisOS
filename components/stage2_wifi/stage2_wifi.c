@@ -239,6 +239,27 @@ static void wifi_start_scan(wifi_ui_t *ui)
     (void)esp_wifi_scan_start(&sc, false);
 }
 
+static void kb_event_cb(lv_event_t *e)
+{
+    wifi_ui_t *ui = (wifi_ui_t *)lv_event_get_user_data(e);
+    if (!ui) return;
+
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_READY) {
+        if (ui->kb) {
+            lv_obj_add_flag(ui->kb, LV_OBJ_FLAG_HIDDEN);
+            lv_keyboard_set_textarea(ui->kb, NULL);
+        }
+        ui_set_status(ui, "Password entry complete. Press Connect.", lv_color_hex(0xA0A4AB));
+    } else if (code == LV_EVENT_CANCEL) {
+        if (ui->kb) {
+            lv_obj_add_flag(ui->kb, LV_OBJ_FLAG_HIDDEN);
+            lv_keyboard_set_textarea(ui->kb, NULL);
+        }
+        ui_set_status(ui, "Password entry cancelled", lv_color_hex(0xFFCC33));
+    }
+}
+
 static void list_btn_cb(lv_event_t *e)
 {
     wifi_ui_t *ui = (wifi_ui_t *)lv_event_get_user_data(e);
@@ -262,7 +283,9 @@ static void list_btn_cb(lv_event_t *e)
     if (!ui->kb) {
         ui->kb = lv_keyboard_create(lv_scr_act());
         lv_keyboard_set_textarea(ui->kb, ui->psk_ta);
+        lv_obj_add_event_cb(ui->kb, kb_event_cb, LV_EVENT_ALL, ui);
     } else {
+        lv_obj_clear_flag(ui->kb, LV_OBJ_FLAG_HIDDEN);
         lv_keyboard_set_textarea(ui->kb, ui->psk_ta);
     }
 }

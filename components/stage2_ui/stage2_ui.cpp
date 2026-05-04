@@ -30,11 +30,9 @@ namespace stage2_ui {
 
 static lv_obj_t* s_current_screen = nullptr;
 static lv_obj_t* s_screen_to_delete = nullptr;
-static lv_obj_t* s_confirmation_label = nullptr;
 static lv_obj_t* s_progress_bar = nullptr;
 static lv_obj_t* s_countdown_label = nullptr;
 static bool s_confirmation_result = false;
-static bool s_in_confirmation = false;
 static lv_obj_t* s_splash_genesis = nullptr;
 static lv_obj_t* s_splash_progress = nullptr;
 static lv_obj_t* s_menu_stage = nullptr;
@@ -43,6 +41,7 @@ static void show_backup_user_to_sd();
 static void show_restore_user_from_sd();
 static void show_repartition_from_sd();
 static void show_about_modal();
+static void show_message_wait(const char* title_text, const char* body_text, uint32_t body_color = 0x888899);
 
 static uint32_t lerp_color(uint32_t a, uint32_t b, float t)
 {
@@ -408,6 +407,7 @@ void show_boot_menu()
 
         int selected = 0;
         const int64_t start = esp_timer_get_time();
+        bool touch_clicked = false;
 
         // Create menu item buttons
         constexpr int item_count = (int)(sizeof(items) / sizeof(items[0]));
@@ -420,6 +420,7 @@ void show_boot_menu()
             }
             lv_obj_set_pos(buttons[i], 40, 70 + i * 52);
             lv_obj_set_size(buttons[i], 288, 44);
+            lv_obj_set_user_data(buttons[i], (void*)(intptr_t)i);
 
             lv_obj_t* lbl = lv_label_create(buttons[i]);
             if (!lbl) {
@@ -448,6 +449,26 @@ void show_boot_menu()
         };
         update_selection();
 
+        struct MenuClickCtx {
+            int* selected_ptr;
+            bool* execute_ptr;
+        };
+        MenuClickCtx click_ctx = {&selected, &touch_clicked};
+
+        auto on_menu_click = [](lv_event_t* e) {
+            auto* ctx = (MenuClickCtx*)lv_event_get_user_data(e);
+            lv_obj_t* target = lv_event_get_target(e);
+            if (!ctx || !ctx->selected_ptr || !ctx->execute_ptr || !target) return;
+            *ctx->selected_ptr = (int)(intptr_t)lv_obj_get_user_data(target);
+            *ctx->execute_ptr = true;
+        };
+
+        for (int i = 0; i < item_count; i++) {
+            if (buttons[i]) {
+                lv_obj_add_event_cb(buttons[i], on_menu_click, LV_EVENT_CLICKED, &click_ctx);
+            }
+        }
+
         while ((esp_timer_get_time() - start) < 10000000) {
             auto ev = stage2_input::poll_button();
 
@@ -469,13 +490,37 @@ void show_boot_menu()
             }
 
             tick();
+
+            if (touch_clicked) {
+                break;
+            }
+
             vTaskDelay(pdMS_TO_TICKS(30));
         }
 
         ESP_LOGI(TAG, "Executing menu item: %s", items[selected]);
 
         switch (selected) {
-            case 0: stage2_boot::boot_genesisos(); return;
+            case 0:
+                if (!stage2_boot::has_bootable_genesis_partition()) {
+                    show_message_wait(
+                        "Boot Target Missing",
+                        "No bootable GenesisOS partition found.\n\nRouting to Recovery...",
+                        0xFF3B3B
+                    );
+                    stage2_recovery::run();
+                    return;
+                }
+                if (!stage2_boot::boot_genesisos()) {
+                    show_message_wait(
+                        "Boot Failed",
+                        "GenesisOS boot target check failed.\n\nRouting to Recovery...",
+                        0xFF3B3B
+                    );
+                    stage2_recovery::run();
+                    return;
+                }
+                return;
             case 1: stage2_recovery::run(); return;
             case 2: stage2_ota::install_saved_update(); return;
             case 3: stage2_ota::download_update_flow(); return;
@@ -519,6 +564,7 @@ void show_advanced_menu()
     };
 
     int selected = 0;
+    bool touch_clicked = false;
 
     // Create menu item buttons
     constexpr int item_count = (int)(sizeof(items) / sizeof(items[0]));
@@ -527,6 +573,7 @@ void show_advanced_menu()
         buttons[i] = lv_btn_create(s_current_screen);
         lv_obj_set_pos(buttons[i], 40, 60 + i * 42);
         lv_obj_set_size(buttons[i], 288, 36);
+        lv_obj_set_user_data(buttons[i], (void*)(intptr_t)i);
 
         lv_obj_t* lbl = lv_label_create(buttons[i]);
         lv_label_set_text(lbl, items[i]);
@@ -550,6 +597,26 @@ void show_advanced_menu()
     };
     update_selection();
 
+    struct AdvancedClickCtx {
+        int* selected_ptr;
+        bool* execute_ptr;
+    };
+    AdvancedClickCtx click_ctx = {&selected, &touch_clicked};
+
+    auto on_advanced_click = [](lv_event_t* e) {
+        auto* ctx = (AdvancedClickCtx*)lv_event_get_user_data(e);
+        lv_obj_t* target = lv_event_get_target(e);
+        if (!ctx || !ctx->selected_ptr || !ctx->execute_ptr || !target) return;
+        *ctx->selected_ptr = (int)(intptr_t)lv_obj_get_user_data(target);
+        *ctx->execute_ptr = true;
+    };
+
+    for (int i = 0; i < item_count; i++) {
+        if (buttons[i]) {
+            lv_obj_add_event_cb(buttons[i], on_advanced_click, LV_EVENT_CLICKED, &click_ctx);
+        }
+    }
+
     while (true) {
         auto ev = stage2_input::poll_button();
 
@@ -559,7 +626,8 @@ void show_advanced_menu()
             ESP_LOGI(TAG, "Advanced selected: %s", items[selected]);
         }
 
-        if (ev == stage2_input::ButtonEvent::LongPress) {
+        if (ev == stage2_input::ButtonEvent::LongPress || touch_clicked) {
+            touch_clicked = false;
             ESP_LOGI(TAG, "Executing advanced item: %s", items[selected]);
 
             switch (selected) {
@@ -623,6 +691,7 @@ void show_advanced_menu()
                 buttons[i] = lv_btn_create(s_current_screen);
                 lv_obj_set_pos(buttons[i], 40, 60 + i * 42);
                 lv_obj_set_size(buttons[i], 288, 36);
+                lv_obj_set_user_data(buttons[i], (void*)(intptr_t)i);
 
                 lv_obj_t* lbl = lv_label_create(buttons[i]);
                 lv_label_set_text(lbl, items[i]);
@@ -631,6 +700,7 @@ void show_advanced_menu()
                 lv_obj_set_style_align(lbl, LV_ALIGN_CENTER, 0);
 
                 style_button(buttons[i], 0x1A1A2E);
+                lv_obj_add_event_cb(buttons[i], on_advanced_click, LV_EVENT_CLICKED, &click_ctx);
             }
             update_selection();
         }
@@ -682,7 +752,7 @@ void show_wifi_setup()
     }
 }
 
-static void show_message_wait(const char* title_text, const char* body_text, uint32_t body_color = 0x888899)
+static void show_message_wait(const char* title_text, const char* body_text, uint32_t body_color)
 {
     // Create screen and block until user holds BOOT.
     destroy_current_screen();

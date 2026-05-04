@@ -17,6 +17,8 @@ static bool s_last_pressed = false;
 static int64_t s_press_start_us = 0;
 static int64_t s_last_release_us = 0;
 static int s_tap_count = 0;
+static bool s_longpress_fired = false;
+static bool s_hold5s_fired = false;
 
 void init()
 {
@@ -51,11 +53,26 @@ ButtonEvent poll_button()
     if (pressed && !s_last_pressed) {
         s_press_start_us = now;
         s_last_pressed = true;
+        s_longpress_fired = false;
+        s_hold5s_fired = false;
         return ButtonEvent::None;
     }
 
     if (pressed && s_last_pressed) {
-        if ((now - s_press_start_us) >= 5000000) return ButtonEvent::Hold5s;
+        const int64_t held_us = now - s_press_start_us;
+
+        // One-shot long press for menu "select/activate"
+        if (!s_longpress_fired && held_us >= 900000) {
+            s_longpress_fired = true;
+            return ButtonEvent::LongPress;
+        }
+
+        // Preserve one-shot 5s hold semantics for recovery/other flows
+        if (!s_hold5s_fired && held_us >= 5000000) {
+            s_hold5s_fired = true;
+            return ButtonEvent::Hold5s;
+        }
+
         return ButtonEvent::None;
     }
 
@@ -63,13 +80,19 @@ ButtonEvent poll_button()
         const int64_t duration = now - s_press_start_us;
         s_last_pressed = false;
         s_press_start_us = 0;
+        const bool was_long = s_longpress_fired || s_hold5s_fired;
+        s_longpress_fired = false;
+        s_hold5s_fired = false;
 
-        // Treat any release <5s as a discrete "short press" for StageTwo UI purposes.
-        // This avoids accidental long-press behaviors while we stabilize the menu trigger.
-        (void)duration;
-        s_tap_count = 0;
-        s_last_release_us = now;
-        return ButtonEvent::ShortPress;
+        // Emit short press only when this press was not already consumed as long/hold.
+        if (!was_long) {
+            (void)duration;
+            s_tap_count = 0;
+            s_last_release_us = now;
+            return ButtonEvent::ShortPress;
+        }
+
+        return ButtonEvent::None;
     }
 
     return ButtonEvent::None;

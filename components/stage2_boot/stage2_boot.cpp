@@ -28,6 +28,27 @@ bool is_partition_valid(const char* label)
     return true;
 }
 
+bool can_boot_partition(const char* label)
+{
+    const esp_partition_t* part = find_partition(label);
+    if (!part) {
+        ESP_LOGW(TAG, "Partition missing: %s", label);
+        return false;
+    }
+
+    if (!is_partition_valid(label)) {
+        ESP_LOGW(TAG, "Partition not bootable: %s", label);
+        return false;
+    }
+
+    return true;
+}
+
+bool has_bootable_genesis_partition()
+{
+    return can_boot_partition("genesis_a") || can_boot_partition("genesis_b");
+}
+
 bool mark_partition_for_next_boot(const char* label)
 {
     const esp_partition_t* part = find_partition(label);
@@ -52,6 +73,11 @@ bool mark_partition_for_next_boot(const char* label)
 
 bool boot_partition(const char* label)
 {
+    if (!can_boot_partition(label)) {
+        ESP_LOGE(TAG, "Pre-check failed, refusing reboot to target partition: %s", label);
+        return false;
+    }
+
     if (!mark_partition_for_next_boot(label)) return false;
     reboot();
     return true;
@@ -59,6 +85,12 @@ bool boot_partition(const char* label)
 
 bool boot_genesisos()
 {
+    // Pre-check entire AB fallback chain before any targeted reboot.
+    if (!has_bootable_genesis_partition()) {
+        ESP_LOGE(TAG, "No bootable GenesisOS partition available (A/B missing or invalid)");
+        return false;
+    }
+
     // Primary boot target is the stable GenesisOS slot A
     if (boot_partition("genesis_a")) return true;
 
